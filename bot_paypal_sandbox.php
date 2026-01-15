@@ -1,67 +1,75 @@
 <?php
 // ================================
-// ATIVAR ERROS (para depuração Render)
+// DEBUG
 // ================================
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 // ================================
-// CONFIGURAÇÃO DO BOT
+// CONFIG
 // ================================
-$botToken = "7738664119:AAF9OOZhzpdZbt8-OZ0lZLC4yZgIhat_cEo"; // Token do BotFather
+$botToken = "7738664119:AAF9OOZhzpdZbt8-OZ0lZLC4yZgIhat_cEo";
 $clientId = "AdffUCeEAXTKA8poWBnH2FcKtxKotqw3597I9hnDEUVZjIF1lD2NWUjbhoDNGAxJxSfBUUlAPGLjS82K";
 $secret   = "ECSD_2TAkgcLvn_LubRrG0JERnuOQQ2c8sxuA3W0LZ_UCIZXcuQiRLnBFcj0p1zHykmdOtP0ER7JyzYF";
 $baseUrl  = "https://api-m.sandbox.paypal.com";
 
 // ================================
-// LER UPDATE DO TELEGRAM
+// RECEBER UPDATE
 // ================================
 $update = json_decode(file_get_contents("php://input"), true);
-
-// Log para debug
-file_put_contents("log.txt", date('Y-m-d H:i:s') . " - " . json_encode($update) . "\n", FILE_APPEND);
-
 if (!$update) exit;
 
 $message = $update["message"]["text"] ?? "";
 $chatId  = $update["message"]["chat"]["id"] ?? null;
 
-if (!$message || !$chatId) exit;
+$callback = $update["callback_query"] ?? null;
 
 // ================================
-// TRATAR COMANDO /card
+// FUNÇÃO TELEGRAM
 // ================================
-if (strpos($message, "/card") === 0) {
+function sendMessage($chatId, $text, $keyboard = null) {
+    global $botToken;
 
-    $cardsText = trim(str_replace("/card", "", $message));
-    if (empty($cardsText)) {
-        sendMessage($chatId, "❌ Envie os cartões abaixo do comando /card\nExemplo:\n/card\n4066698784649380|07|2028|847");
-        exit;
+    $data = [
+        "chat_id" => $chatId,
+        "text" => $text,
+        "parse_mode" => "HTML"
+    ];
+
+    if ($keyboard) {
+        $data["reply_markup"] = json_encode($keyboard);
     }
 
-    $cards = array_filter(array_map('trim', explode("\n", $cardsText)));
+    file_get_contents(
+        "https://api.telegram.org/bot$botToken/sendMessage?" .
+        http_build_query($data)
+    );
+}
 
-    // Limite máximo de 30 cartões
-    if (count($cards) > 30) {
-        sendMessage($chatId, "❌ Máximo permitido: 30 cartões por vez.\nVocê enviou: " . count($cards));
-        exit;
-    }
+// ================================
+// /start
+// ================================
+if ($message === "/start") {
+    sendMessage(
+        $chatId,
+        "🛒 <b>Bem-vindo!</b>\n\nProduto disponível:\n💳 <b>Produto Premium – $5</b>",
+        [
+            "inline_keyboard" => [
+                [
+                    ["text" => "💳 Comprar por $5", "callback_data" => "comprar_5"]
+                ]
+            ]
+        ]
+    );
+    exit;
+}
 
-    // Validação de formato dos cartões
-    foreach ($cards as $card) {
-        if (!preg_match('/^\d{13,19}\|\d{2}\|\d{4}\|\d{3,4}$/', $card)) {
-            sendMessage($chatId, "❌ Formato inválido detectado:\n$card\nUse:\n4066698784649380|07|2028|847");
-            exit;
-        }
-    }
+// ================================
+// BOTÃO COMPRAR
+// ================================
+if ($callback && $callback["data"] === "comprar_5") {
 
-    $totalCards = count($cards);
-
-    sendMessage($chatId, "✅ Cartões recebidos com sucesso!\nQuantidade: $totalCards\nProcessando...");
-
-    // ================================
-    // 1️⃣ GERAR TOKEN OAUTH PAYPAL
-    // ================================
+    // TOKEN PAYPAL
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => "$baseUrl/v1/oauth2/token",
@@ -70,43 +78,34 @@ if (strpos($message, "/card") === 0) {
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => "grant_type=client_credentials",
         CURLOPT_HTTPHEADER => [
-            "Accept: application/json",
-            "Accept-Language: en_US"
+            "Accept: application/json"
         ]
     ]);
 
-    $tokenRespRaw = curl_exec($ch);
-    if ($tokenRespRaw === false) {
-        sendMessage($chatId, "Erro CURL TOKEN: " . curl_error($ch));
-        exit;
-    }
+    $tokenResp = json_decode(curl_exec($ch), true);
     curl_close($ch);
 
-    $tokenResp = json_decode($tokenRespRaw, true);
-    $token = $tokenResp['access_token'] ?? null;
-    if (!$token) {
-        sendMessage($chatId, "❌ Não foi possível gerar token PayPal.");
+    if (!isset($tokenResp["access_token"])) {
+        sendMessage($callback["message"]["chat"]["id"], "❌ Erro ao gerar pagamento.");
         exit;
     }
 
-    // ================================
-    // 2️⃣ CRIAR ORDER PAYPAL
-    // ================================
-    $amount = $totalCards; // 1 USD por cartão
-    $orderData = [
+    $token = $tokenResp["access_token"];
+
+    // ORDER
+    $order = [
         "intent" => "CAPTURE",
         "purchase_units" => [[
             "amount" => [
                 "currency_code" => "USD",
-                "value" => strval($amount)
+                "value" => "5.00"
             ]
         ]],
         "application_context" => [
-            "brand_name" => "Teste Sandbox",
-            "landing_page" => "BILLING",
+            "brand_name" => "Loja Telegram",
             "user_action" => "PAY_NOW",
-            "return_url" => "https://seusite.com/sucesso.php",
-            "cancel_url" => "https://seusite.com/cancelado.php"
+            "return_url" => "https://seusite.com/sucesso",
+            "cancel_url" => "https://seusite.com/cancelado"
         ]
     ];
 
@@ -119,45 +118,24 @@ if (strpos($message, "/card") === 0) {
             "Content-Type: application/json",
             "Authorization: Bearer $token"
         ],
-        CURLOPT_POSTFIELDS => json_encode($orderData)
+        CURLOPT_POSTFIELDS => json_encode($order)
     ]);
 
-    $orderRaw = curl_exec($ch);
+    $orderResp = json_decode(curl_exec($ch), true);
     curl_close($ch);
 
-    $order = json_decode($orderRaw, true);
-    if (!isset($order['id'])) {
-        sendMessage($chatId, "❌ Erro ao criar order PayPal:\n$orderRaw");
+    if (!isset($orderResp["links"])) {
+        sendMessage($callback["message"]["chat"]["id"], "❌ Erro ao criar pedido.");
         exit;
     }
 
-    // ================================
-    // 3️⃣ PEGAR LINK DE APROVAÇÃO
-    // ================================
-    $approveLink = null;
-    foreach ($order['links'] as $link) {
-        if ($link['rel'] === 'approve') {
-            $approveLink = $link['href'];
-            break;
+    foreach ($orderResp["links"] as $link) {
+        if ($link["rel"] === "approve") {
+            sendMessage(
+                $callback["message"]["chat"]["id"],
+                "💳 <b>Pagamento criado</b>\n\nClique para pagar:\n" . $link["href"]
+            );
+            exit;
         }
     }
-
-    if (!$approveLink) {
-        sendMessage($chatId, "❌ Link de aprovação não encontrado.");
-        exit;
-    }
-
-    // ================================
-    // 4️⃣ ENVIAR LINK PARA O TELEGRAM
-    // ================================
-    sendMessage($chatId, "✅ Pedido sandbox criado!\nOrder ID: {$order['id']}\nTotal: $amount USD\nAprovar pagamento: $approveLink");
-}
-
-// ================================
-// FUNÇÃO PARA ENVIAR MENSAGEM TELEGRAM
-// ================================
-function sendMessage($chatId, $text) {
-    global $botToken;
-    $text = urlencode($text);
-    file_get_contents("https://api.telegram.org/bot$botToken/sendMessage?chat_id=$chatId&text=$text");
 }
