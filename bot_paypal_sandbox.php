@@ -17,6 +17,10 @@ $baseUrl  = "https://api-m.sandbox.paypal.com";
 // LER UPDATE DO TELEGRAM
 // ================================
 $update = json_decode(file_get_contents("php://input"), true);
+
+// Log para debug
+file_put_contents("log.txt", date('Y-m-d H:i:s') . " - " . json_encode($update) . "\n", FILE_APPEND);
+
 if (!$update) exit;
 
 $message = $update["message"]["text"] ?? "";
@@ -28,13 +32,32 @@ if (!$message || !$chatId) exit;
 // TRATAR COMANDO /card
 // ================================
 if (strpos($message, "/card") === 0) {
-    $cardsList = trim(str_replace("/card", "", $message));
-    $cards = array_filter(array_map('trim', explode("\n", $cardsList)));
 
-    if (count($cards) === 0) {
-        sendMessage($chatId, "Envie pelo menos 1 cartão no formato: 4066698784649380|07|2028|847");
+    $cardsText = trim(str_replace("/card", "", $message));
+    if (empty($cardsText)) {
+        sendMessage($chatId, "❌ Envie os cartões abaixo do comando /card\nExemplo:\n/card\n4066698784649380|07|2028|847");
         exit;
     }
+
+    $cards = array_filter(array_map('trim', explode("\n", $cardsText)));
+
+    // Limite máximo de 30 cartões
+    if (count($cards) > 30) {
+        sendMessage($chatId, "❌ Máximo permitido: 30 cartões por vez.\nVocê enviou: " . count($cards));
+        exit;
+    }
+
+    // Validação de formato dos cartões
+    foreach ($cards as $card) {
+        if (!preg_match('/^\d{13,19}\|\d{2}\|\d{4}\|\d{3,4}$/', $card)) {
+            sendMessage($chatId, "❌ Formato inválido detectado:\n$card\nUse:\n4066698784649380|07|2028|847");
+            exit;
+        }
+    }
+
+    $totalCards = count($cards);
+
+    sendMessage($chatId, "✅ Cartões recebidos com sucesso!\nQuantidade: $totalCards\nProcessando...");
 
     // ================================
     // 1️⃣ GERAR TOKEN OAUTH PAYPAL
@@ -62,14 +85,14 @@ if (strpos($message, "/card") === 0) {
     $tokenResp = json_decode($tokenRespRaw, true);
     $token = $tokenResp['access_token'] ?? null;
     if (!$token) {
-        sendMessage($chatId, "Não foi possível gerar token PayPal.");
+        sendMessage($chatId, "❌ Não foi possível gerar token PayPal.");
         exit;
     }
 
     // ================================
     // 2️⃣ CRIAR ORDER PAYPAL
     // ================================
-    $amount = count($cards); // 1 USD por cartão
+    $amount = $totalCards; // 1 USD por cartão
     $orderData = [
         "intent" => "CAPTURE",
         "purchase_units" => [[
@@ -104,7 +127,7 @@ if (strpos($message, "/card") === 0) {
 
     $order = json_decode($orderRaw, true);
     if (!isset($order['id'])) {
-        sendMessage($chatId, "Erro ao criar order PayPal:\n$orderRaw");
+        sendMessage($chatId, "❌ Erro ao criar order PayPal:\n$orderRaw");
         exit;
     }
 
@@ -120,7 +143,7 @@ if (strpos($message, "/card") === 0) {
     }
 
     if (!$approveLink) {
-        sendMessage($chatId, "Link de aprovação não encontrado.");
+        sendMessage($chatId, "❌ Link de aprovação não encontrado.");
         exit;
     }
 
