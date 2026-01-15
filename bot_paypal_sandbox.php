@@ -1,9 +1,14 @@
 <?php
 // ================================
+// ATIVAR ERROS (para depuração Render)
+// ================================
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// ================================
 // CONFIGURAÇÃO DO BOT
 // ================================
-$botToken = "7738664119:AAF9OOZhzpdZbt8-OZ0lZLC4yZgIhat_cEo";       // Token do BotFather
-$chatId   = "8312325078";                     // Vai ser preenchido dinamicamente
+$botToken = "7738664119:AAF9OOZhzpdZbt8-OZ0lZLC4yZgIhat_cEo"; // Token do BotFather
 $clientId = "AdffUCeEAXTKA8poWBnH2FcKtxKotqw3597I9hnDEUVZjIF1lD2NWUjbhoDNGAxJxSfBUUlAPGLjS82K";
 $secret   = "ECSD_2TAkgcLvn_LubRrG0JERnuOQQ2c8sxuA3W0LZ_UCIZXcuQiRLnBFcj0p1zHykmdOtP0ER7JyzYF";
 $baseUrl  = "https://api-m.sandbox.paypal.com";
@@ -23,7 +28,6 @@ if (!$message || !$chatId) exit;
 // TRATAR COMANDO /card
 // ================================
 if (strpos($message, "/card") === 0) {
-    // remover o comando e pegar o restante
     $cardsList = trim(str_replace("/card", "", $message));
     $cards = array_filter(array_map('trim', explode("\n", $cardsList)));
 
@@ -65,8 +69,7 @@ if (strpos($message, "/card") === 0) {
     // ================================
     // 2️⃣ CRIAR ORDER PAYPAL
     // ================================
-    // Valor: 1 USD por cartão (simulação)
-    $amount = count($cards); // por exemplo 1 USD por cartão
+    $amount = count($cards); // 1 USD por cartão
     $orderData = [
         "intent" => "CAPTURE",
         "purchase_units" => [[
